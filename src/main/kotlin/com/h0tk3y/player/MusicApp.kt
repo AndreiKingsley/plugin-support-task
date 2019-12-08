@@ -1,6 +1,7 @@
 package com.h0tk3y.player
 
 import java.io.File
+import java.io.InputStream
 import java.net.URLClassLoader
 import kotlin.jvm.internal.Reflection
 import kotlin.reflect.KMutableProperty
@@ -8,6 +9,7 @@ import kotlin.reflect.KMutableProperty1
 import kotlin.reflect.KProperty0
 import kotlin.reflect.full.memberProperties
 import kotlin.reflect.full.primaryConstructor
+import kotlin.reflect.jvm.jvmErasure
 
 open class MusicApp(
     private val pluginClasspath: List<File>,
@@ -26,8 +28,13 @@ open class MusicApp(
         try {
             plugins.forEach {
                 val inputFile = File(pluginsDirectory, it.pluginId + ".mplug")
-                inputFile.createNewFile()
-                it.init(inputFile.inputStream())
+                if(inputFile.exists()){
+                    inputFile.inputStream().use {inputStream ->
+                        it.init(inputStream)
+                    }
+                } else {
+                    it.init(null)
+                }
             }
         } catch (e: PluginClassNotFoundException) {
             throw e
@@ -41,13 +48,17 @@ open class MusicApp(
         if (isClosed) return
         isClosed = true
         plugins.forEach {
-            it.persist(File(pluginsDirectory, it.pluginId + ".mplug").outputStream())
+            val outputFile = File(pluginsDirectory, it.pluginId + ".mplug")
+            outputFile.createNewFile()
+            outputFile.outputStream().use {
+                outputStream -> it.persist(outputStream)
+            }
         }
     }
 
     fun wipePersistedPluginData() {
         plugins.forEach {
-            File(pluginsDirectory, it.pluginId + ".mplug").writeBytes(byteArrayOf())
+            File(pluginsDirectory, it.pluginId + ".mplug").delete()
         }
     }
 
@@ -65,6 +76,10 @@ open class MusicApp(
             } catch (e: ClassNotFoundException) {
                 throw PluginClassNotFoundException(pluginName)
             }
+        /*    if(inputClass is MusicPlugin){
+                throw IllegalPluginException(inputClass.java)
+            } */
+           //todo check implepents music plugin
             val primaryConstructor = inputClass.primaryConstructor
             if (primaryConstructor == null || primaryConstructor.parameters.isEmpty()) {
                 val noParamConstructor = inputClass.constructors.find { it.parameters.isEmpty() }
@@ -84,18 +99,18 @@ open class MusicApp(
                 if (primaryConstructor.parameters.size != 1) {
                     throw IllegalPluginException(inputClass.java)
                 }
-                ans.add(primaryConstructor.call(this) as MusicPlugin)
+           /*     if (primaryConstructor.parameters.single().type.jvmErasure.java is MusicApp){
+                    throw IllegalPluginException(inputClass.java)
+                } */
+                ans.add(primaryConstructor.call(this) as MusicPlugin) //todo check parametr class + test
             }
         }
 
-        return@lazy ans.toList()
+        return@lazy ans
     }
 
     fun findSinglePlugin(pluginClassName: String): MusicPlugin? {
-        if (plugins.filter { it::class.java.canonicalName == pluginClassName }.size == 1) {
-            return plugins.find { it::class.java.canonicalName == pluginClassName }
-        }
-        return null
+        return plugins.singleOrNull{it::class.java.canonicalName == pluginClassName}
     }
 
     fun <T : MusicPlugin> getPlugins(pluginClass: Class<T>): List<T> =
